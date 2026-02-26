@@ -1,5 +1,6 @@
 using MileageByStateGoogle.Models;
 using MileageByStateGoogle.Utils;
+using MileageByStateGoogle.AppData;
 using Serilog;
 using System.Diagnostics;
 
@@ -8,6 +9,7 @@ namespace MileageByStateGoogle.Services;
 public class MileageEngine
 {
     private readonly GoogleApiService _google;
+    private readonly TravelMileageRepository _repo;
 
     private readonly Dictionary<string, double> _stateRates = new()
     {
@@ -16,9 +18,10 @@ public class MileageEngine
         { "MA", 0.70 }
     };
 
-    public MileageEngine(GoogleApiService google)
+    public MileageEngine(GoogleApiService google, TravelMileageRepository repo)
     {
         _google = google;
+        _repo= repo;
     }
 
     public async Task<MileageResult> CalculateMileageByState(
@@ -62,7 +65,15 @@ public class MileageEngine
                 }
 
                 // APPLY NEW DEDUCTION LOGIC (START-STATE-FIRST)
+                if(travelItem.start_leg_deduction=="Y")
+                {
                 ApplyDeductionStartStateFirst(travelItem.deduct_miles, allSegments, travelId);
+                }
+                 // APPLY NEW DEDUCTION LOGIC (START-STATE-FIRST)
+                if((travelItem.start_leg_deduction=="N") && (travelItem.deduct_miles > 0))
+                {
+                ApplyDeductionFromLastState(travelItem.deduct_miles, allSegments, travelId);
+                }
 
                 // Aggregate by state
                 var stateAggregates = allSegments
@@ -92,6 +103,7 @@ public class MileageEngine
                         Final_Mile = finalMiles,
                         Reimbursement = finalMiles * rate
                     });
+                    _repo.InsertTravelMileage(travelId,travelItem.travel_dt,st.State,rate,st.Miles,st.Deducted,finalMiles,finalMiles * rate);
 
                     Log.Information(
                         "State summary travel_id={TravelId} State={State} Miles={Miles:F2} Deducted={Deduct:F2} Final={Final:F2}",
@@ -256,4 +268,43 @@ public class MileageEngine
             deduct -= take;
         }
     }
+  private void ApplyDeductionFromLastState(double deduct,List<StateMileage> segments,string travelId)
+{
+    if (deduct <= 0 || segments == null || segments.Count == 0)
+        return;
+
+    Log.Warning(
+        "Applying fallback deduction from LAST state for travel_id {TravelId}. Remaining={Remaining:F2}",
+        travelId, deduct);
+
+    // Traverse from last to first
+    for (int i = segments.Count - 1; i >= 0; i--)
+    {
+        if (deduct <= 0)
+            break;
+
+        var sm = segments[i];
+
+        double available = sm.Miles - sm.Deducted;
+        if (available <= 0)
+            continue;
+
+        double take = Math.Min(available, deduct);
+
+        sm.Deducted += take;
+        deduct -= take;
+
+        Log.Information(
+            "Last-State Deduction travel_id={TravelId}: State={State}, Available={Available:F2}, Taking={Take:F2}, Remaining={Remaining:F2}",
+            travelId, sm.State, available, take, deduct);
+    }
+
+    if (deduct > 0)
+    {
+        Log.Warning(
+            "Still unable to fully deduct miles for travel_id {TravelId}. Undeducted={Remaining:F2}",
+            travelId, deduct);
+    }
+}
+
 }

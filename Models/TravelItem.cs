@@ -13,5 +13,7 @@ namespace MileageByStateGoogle.Models
         public double travel_distance { get; set; }
         public double deduct_miles { get; set; }
         public double actual_amount { get; set; }
+        public string start_leg_deduction { get; set; }
+        
     }
 }

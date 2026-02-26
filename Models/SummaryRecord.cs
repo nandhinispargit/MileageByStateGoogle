@@ -10,5 +10,7 @@ namespace MileageByStateGoogle.Models
 
         public double MilesByState { get; set; }
         public double adjusted_amount { get; set; }
+
+        public string has_highppayrate_state { get; set; }
     }
 }
