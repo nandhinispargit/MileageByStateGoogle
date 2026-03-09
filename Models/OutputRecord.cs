@@ -13,5 +13,7 @@ namespace MileageByStateGoogle.Models
         public double Final_Mile { get; set; }
 
         public double Reimbursement { get; set; }
+
+        public int TravelLegNo { get; set; }
     }
 }

@@ -21,7 +21,7 @@ public class MileageEngine
     public MileageEngine(GoogleApiService google, TravelMileageRepository repo)
     {
         _google = google;
-        _repo= repo;
+        _repo = repo;
     }
 
     public async Task<MileageResult> CalculateMileageByState(
@@ -33,21 +33,23 @@ public class MileageEngine
         var output = new List<OutputRecord>();
         var apiStatsList = new List<ApiCallStatsRecord>();
 
-        var groups = travelDetails.GroupBy(d => d.travel_id);
+        var groups = travelDetails.GroupBy(d => new { d.travel_id, d.travel_leg_no });
 
         foreach (var group in groups)
         {
-            string travelId = group.Key;
+            string travelId = group.Key.travel_id;
+            int travellegno = group.Key.travel_leg_no;
             Log.Information("Processing travel_id: {TravelId}", travelId);
 
             var sw = Stopwatch.StartNew();
 
             int directionsCalls = 0;
             int geocodeCalls = 0;
+            var travelStateApiCounts = new Dictionary<string, int>();
 
             try
             {
-                var travelItem = travelItems.First(t => t.travel_id == travelId);
+                var travelItem = travelItems.First(t => t.travel_id == travelId && t.travel_leg_no == travellegno);
                 var allSegments = new List<StateMileage>();
 
                 foreach (var leg in group)
@@ -57,6 +59,14 @@ public class MileageEngine
                         var counts = await ProcessLeg(allSegments, leg);
                         directionsCalls += counts.Directions;
                         geocodeCalls += counts.Geocodes;
+
+                        foreach (var kv in counts.StateApiCount)
+                        {
+                            if (travelStateApiCounts.ContainsKey(kv.Key))
+                                travelStateApiCounts[kv.Key] += kv.Value;
+                            else
+                                travelStateApiCounts[kv.Key] = kv.Value;
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -65,14 +75,14 @@ public class MileageEngine
                 }
 
                 // APPLY NEW DEDUCTION LOGIC (START-STATE-FIRST)
-                if(travelItem.start_leg_deduction=="Y")
+                if (travelItem.start_leg_deduction == "Y")
                 {
-                ApplyDeductionStartStateFirst(travelItem.deduct_miles, allSegments, travelId);
+                    ApplyDeductionStartStateFirst(travelItem.deduct_miles, allSegments, travelId);
                 }
-                 // APPLY NEW DEDUCTION LOGIC (START-STATE-FIRST)
-                if((travelItem.start_leg_deduction=="N") && (travelItem.deduct_miles > 0))
+                // APPLY NEW DEDUCTION LOGIC (START-STATE-FIRST)
+                if ((travelItem.start_leg_deduction == "N") && (travelItem.deduct_miles > 0))
                 {
-                ApplyDeductionFromLastState(travelItem.deduct_miles, allSegments, travelId);
+                    ApplyDeductionFromLastState(travelItem.deduct_miles, allSegments, travelId);
                 }
 
                 // Aggregate by state
@@ -82,7 +92,10 @@ public class MileageEngine
                     {
                         State = g.Key,
                         Miles = g.Sum(x => x.Miles),
-                        Deducted = g.Sum(x => x.Deducted)
+                        Deducted = g.Sum(x => x.Deducted),
+                        Apicalls = travelStateApiCounts.ContainsKey(g.Key)
+            ? travelStateApiCounts[g.Key]
+            : 0,
                     })
                     .ToList();
 
@@ -101,13 +114,14 @@ public class MileageEngine
                         Miles = st.Miles,
                         Deducted = st.Deducted,
                         Final_Mile = finalMiles,
-                        Reimbursement = finalMiles * rate
+                        Reimbursement = finalMiles * rate,
+                        TravelLegNo=travelItem.travel_leg_no
                     });
-                    _repo.InsertTravelMileage(travelId,travelItem.travel_dt,st.State,rate,st.Miles,st.Deducted,finalMiles,finalMiles * rate);
+                    _repo.InsertTravelMileage(travelId, travelItem.travel_dt, st.State, rate, st.Miles, st.Deducted, finalMiles, finalMiles * rate, travelItem.travel_leg_no, travelItem.merch_no, st.Apicalls);
 
                     Log.Information(
-                        "State summary travel_id={TravelId} State={State} Miles={Miles:F2} Deducted={Deduct:F2} Final={Final:F2}",
-                        travelId, st.State, st.Miles, st.Deducted, finalMiles
+                        "State summary travel_id={TravelId} State={State} Miles={Miles:F2} Deducted={Deduct:F2} Final={Final:F2} TravelLegNo={TravelLegNo}",
+                        travelId, st.State, st.Miles, st.Deducted, finalMiles , travelItem.travel_leg_no
                     );
                 }
 
@@ -118,13 +132,7 @@ public class MileageEngine
                     directionsCalls + geocodeCalls
                 );
 
-                apiStatsList.Add(new ApiCallStatsRecord
-                {
-                    travel_id = travelId,
-                    DirectionsCalls = directionsCalls,
-                    GeocodeCalls = geocodeCalls,
-                    TotalApiCalls = directionsCalls + geocodeCalls
-                });
+
             }
             catch (Exception ex)
             {
@@ -145,12 +153,13 @@ public class MileageEngine
     // ==========================================================
     // PROCESS ONE LEG — (UNCHANGED)
     // ==========================================================
-    private async Task<(int Directions, int Geocodes)> ProcessLeg(
+    private async Task<(int Directions, int Geocodes, Dictionary<string, int> StateApiCount)> ProcessLeg(
         List<StateMileage> result,
         TravelDetail leg)
     {
         int directionsCalls = 0;
         int geocodeCalls = 0;
+        var stateApiCount = new Dictionary<string, int>();
 
         var dir = await _google.GetDirections(
             leg.Start_latitude, leg.Start_longitude,
@@ -161,7 +170,7 @@ public class MileageEngine
         if (dir == null || dir.routes == null || dir.routes.Count == 0)
         {
             Log.Warning("Google returned NO ROUTE for travel_id {TravelId}", leg.travel_id);
-            return (directionsCalls, geocodeCalls);
+            return (directionsCalls, geocodeCalls, stateApiCount);
         }
 
         if (dir.status == "OVER_QUERY_LIMIT")
@@ -175,7 +184,7 @@ public class MileageEngine
         if (points.Count < 2)
         {
             Log.Warning("Polyline too short for travel_id {TravelId}", leg.travel_id);
-            return (directionsCalls, geocodeCalls);
+            return (directionsCalls, geocodeCalls, stateApiCount);
         }
 
         int sampleCount = Math.Max(10, points.Count / 3);
@@ -185,12 +194,32 @@ public class MileageEngine
 
         for (int i = 0; i < points.Count; i += interval)
         {
-            sampledStates.Add(await _google.GetState(points[i].lat, points[i].lon));
+            var state = await _google.GetState(points[i].lat, points[i].lon);
+            sampledStates.Add(state);
             geocodeCalls++;
+
+            if (stateApiCount.ContainsKey(state))
+                stateApiCount[state]++;
+            else
+                stateApiCount[state] = 1;
+
+
         }
 
-        sampledStates.Add(await _google.GetState(points[^1].lat, points[^1].lon));
+        //  sampledStates.Add(await _google.GetState(points[^1].lat, points[^1].lon));
+        //  geocodeCalls++;
+
+        var lastState = await _google.GetState(points[^1].lat, points[^1].lon);
+        sampledStates.Add(lastState);
+
         geocodeCalls++;
+
+        if (stateApiCount.ContainsKey(lastState))
+            stateApiCount[lastState]++;
+        else
+            stateApiCount[lastState] = 1;
+
+
 
         Log.Information("Detected route states for travel_id {TravelId}: {States}",
             leg.travel_id, string.Join(" → ", sampledStates.Distinct()));
@@ -212,7 +241,7 @@ public class MileageEngine
             });
         }
 
-        return (directionsCalls, geocodeCalls);
+        return (directionsCalls, geocodeCalls, stateApiCount);
     }
 
     // ==========================================================
@@ -268,43 +297,43 @@ public class MileageEngine
             deduct -= take;
         }
     }
-  private void ApplyDeductionFromLastState(double deduct,List<StateMileage> segments,string travelId)
-{
-    if (deduct <= 0 || segments == null || segments.Count == 0)
-        return;
-
-    Log.Warning(
-        "Applying fallback deduction from LAST state for travel_id {TravelId}. Remaining={Remaining:F2}",
-        travelId, deduct);
-
-    // Traverse from last to first
-    for (int i = segments.Count - 1; i >= 0; i--)
+    private void ApplyDeductionFromLastState(double deduct, List<StateMileage> segments, string travelId)
     {
-        if (deduct <= 0)
-            break;
+        if (deduct <= 0 || segments == null || segments.Count == 0)
+            return;
 
-        var sm = segments[i];
-
-        double available = sm.Miles - sm.Deducted;
-        if (available <= 0)
-            continue;
-
-        double take = Math.Min(available, deduct);
-
-        sm.Deducted += take;
-        deduct -= take;
-
-        Log.Information(
-            "Last-State Deduction travel_id={TravelId}: State={State}, Available={Available:F2}, Taking={Take:F2}, Remaining={Remaining:F2}",
-            travelId, sm.State, available, take, deduct);
-    }
-
-    if (deduct > 0)
-    {
         Log.Warning(
-            "Still unable to fully deduct miles for travel_id {TravelId}. Undeducted={Remaining:F2}",
+            "Applying fallback deduction from LAST state for travel_id {TravelId}. Remaining={Remaining:F2}",
             travelId, deduct);
+
+        // Traverse from last to first
+        for (int i = segments.Count - 1; i >= 0; i--)
+        {
+            if (deduct <= 0)
+                break;
+
+            var sm = segments[i];
+
+            double available = sm.Miles - sm.Deducted;
+            if (available <= 0)
+                continue;
+
+            double take = Math.Min(available, deduct);
+
+            sm.Deducted += take;
+            deduct -= take;
+
+            Log.Information(
+                "Last-State Deduction travel_id={TravelId}: State={State}, Available={Available:F2}, Taking={Take:F2}, Remaining={Remaining:F2}",
+                travelId, sm.State, available, take, deduct);
+        }
+
+        if (deduct > 0)
+        {
+            Log.Warning(
+                "Still unable to fully deduct miles for travel_id {TravelId}. Undeducted={Remaining:F2}",
+                travelId, deduct);
+        }
     }
-}
 
 }

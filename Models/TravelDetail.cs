@@ -12,5 +12,6 @@ namespace MileageByStateGoogle.Models
         public double End_longitude { get; set; }
 
         public double travel_distance { get; set; }
+        public int travel_leg_no { get; set; }
     }
 }

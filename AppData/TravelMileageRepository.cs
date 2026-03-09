@@ -14,7 +14,7 @@ namespace MileageByStateGoogle.AppData
         }
 
         public void InsertTravelMileage(string travelId, string travelDate, string stateCode, double rate, double travelMiles,
-            double deducted, double finalMile, double reimbursement)
+            double deducted, double finalMile, double reimbursement,int travel_leg_no,int merch_no,int apiCallscount)
         {
             try
             {
@@ -31,6 +31,9 @@ namespace MileageByStateGoogle.AppData
                 cmd.Parameters.Add("@deducted", System.Data.SqlDbType.Decimal).Value = deducted;
                 cmd.Parameters.Add("@final_mile", System.Data.SqlDbType.Decimal).Value = finalMile;
                 cmd.Parameters.Add("@reimbursement", System.Data.SqlDbType.Decimal).Value = reimbursement;
+                cmd.Parameters.Add("@travel_leg_no", System.Data.SqlDbType.Int).Value = travel_leg_no;
+                cmd.Parameters.Add("@merch_no", System.Data.SqlDbType.Int).Value = merch_no;  
+                cmd.Parameters.Add("@apicallcount", System.Data.SqlDbType.Int).Value = apiCallscount;
                 //  cmd.Parameters.Add("@create_usrid", System.Data.SqlDbType.NVarChar, 10).Value = userId;
 
                 conn.Open();
@@ -57,6 +60,7 @@ namespace MileageByStateGoogle.AppData
             cmd.Parameters.Add("@adjusted_amount", System.Data.SqlDbType.Decimal).Value = adjustedAmount;   
             // cmd.Parameters.Add("@create_usrid", SqlDbType.NVarChar, 20).Value = userId;
             cmd.Parameters.Add("@highpay_state_flag", System.Data.SqlDbType.NVarChar, 10).Value = highpay_state_flag;
+         //   cmd.Parameters.Add("@apicallcount", System.Data.SqlDbType.Int).Value = apiCallscount;
 
             await conn.OpenAsync();
             await cmd.ExecuteNonQueryAsync();
@@ -69,7 +73,7 @@ namespace MileageByStateGoogle.AppData
             List<TravelDetail> travelDetails = new List<TravelDetail>();
 
             using SqlConnection conn = new SqlConnection(_connectionString);
-            using SqlCommand cmd = new SqlCommand("usp_mileagebystate_get_travel_info", conn);
+            using SqlCommand cmd = new SqlCommand("usp_mileagebystate_get_travel_info_v3", conn);
 
             cmd.CommandType = CommandType.StoredProcedure;
             cmd.Parameters.Add("@lang_id", SqlDbType.Int).Value = langId;
@@ -88,12 +92,13 @@ namespace MileageByStateGoogle.AppData
                     wave_no = reader["wave_no"].ToString(),
                     task_no = reader["task_no"].ToString(),
                     store_id = reader["store_id"].ToString(),
-                    merch_no = reader["merch_no"].ToString(),
+                    merch_no =Convert.ToInt32(reader["merch_no"]),
                     rep_homestate = reader["rep_homestate"].ToString(),
                     travel_distance = Convert.ToDouble(reader["travel_distance"]),
                     deduct_miles = Convert.ToDouble(reader["deducted_miles"]),
                     actual_amount = Convert.ToDouble(reader["actual_amount"]),
-                    start_leg_deduction = reader["start_leg_deduction"].ToString()
+                    start_leg_deduction = reader["start_leg_deduction"].ToString(),
+                    travel_leg_no = Convert.ToInt32(reader["travel_leg_no"])
                 };
 
                 travelItems.Add(item);
@@ -106,7 +111,8 @@ namespace MileageByStateGoogle.AppData
                     Start_longitude = Convert.ToDouble(reader["Start_longitude"]),
                     End_latitude = Convert.ToDouble(reader["End_latitude"]),
                     End_longitude = Convert.ToDouble(reader["End_longitude"]),
-                    travel_distance = Convert.ToDouble(reader["travel_distance"])
+                    travel_distance = Convert.ToDouble(reader["travel_distance"]),
+                    travel_leg_no = Convert.ToInt32(reader["travel_leg_no"])
                 };
 
                 travelDetails.Add(detail);

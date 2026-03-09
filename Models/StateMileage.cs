@@ -5,5 +5,6 @@ namespace MileageByStateGoogle.Models
         public string State { get; set; }
         public double Miles { get; set; }
         public double Deducted { get; set; }
+        public int Apicalls { get; set; }
     }
 }
