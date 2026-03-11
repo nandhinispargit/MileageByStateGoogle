@@ -52,85 +52,135 @@ public class MileageEngine
                 var travelItem = travelItems.First(t => t.travel_id == travelId && t.travel_leg_no == travellegno);
                 var allSegments = new List<StateMileage>();
 
-                foreach (var leg in group)
+                if (Math.Abs(travelItem.travel_distance - travelItem.deduct_miles) < 0.01)
                 {
-                    try
-                    {
-                        var counts = await ProcessLeg(allSegments, leg);
-                        directionsCalls += counts.Directions;
-                        geocodeCalls += counts.Geocodes;
+                    Log.Information("Travel distance equals deducted miles. Skipping API calculation for travel_id {TravelId}", travelId);
 
-                        foreach (var kv in counts.StateApiCount)
-                        {
-                            if (travelStateApiCounts.ContainsKey(kv.Key))
-                                travelStateApiCounts[kv.Key] += kv.Value;
-                            else
-                                travelStateApiCounts[kv.Key] = kv.Value;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error(ex, "Leg error for travel_id {TravelId}. Continuing.", travelId);
-                    }
-                }
+                    var firstLeg = group.First();
 
-                // APPLY NEW DEDUCTION LOGIC (START-STATE-FIRST)
-                if (travelItem.start_leg_deduction == "Y")
-                {
-                    ApplyDeductionStartStateFirst(travelItem.deduct_miles, allSegments, travelId);
-                }
-                // APPLY NEW DEDUCTION LOGIC (START-STATE-FIRST)
-                if ((travelItem.start_leg_deduction == "N") && (travelItem.deduct_miles > 0))
-                {
-                    ApplyDeductionFromLastState(travelItem.deduct_miles, allSegments, travelId);
-                }
 
-                // Aggregate by state
-                var stateAggregates = allSegments
-                    .GroupBy(s => s.State)
-                    .Select(g => new
-                    {
-                        State = g.Key,
-                        Miles = g.Sum(x => x.Miles),
-                        Deducted = g.Sum(x => x.Deducted),
-                        Apicalls = travelStateApiCounts.ContainsKey(g.Key)
-            ? travelStateApiCounts[g.Key]
-            : 0,
-                    })
-                    .ToList();
+                    string startState = await _google.GetState(
+                        firstLeg.Start_latitude,
+                        firstLeg.Start_longitude);
 
-                // Build output rows
-                foreach (var st in stateAggregates)
-                {
-                    double rate = _stateRates.ContainsKey(st.State) ? 0.70 : 0.30;
-                    double finalMiles = st.Miles - st.Deducted;
+                    double rate = _stateRates.ContainsKey(startState) ? 0.70 : 0.30;
 
                     output.Add(new OutputRecord
                     {
                         travel_id = travelId,
                         travel_dt = travelItem.travel_dt,
-                        State = st.State,
+                        State = startState,
                         Rate = rate,
-                        Miles = st.Miles,
-                        Deducted = st.Deducted,
-                        Final_Mile = finalMiles,
-                        Reimbursement = finalMiles * rate,
-                        TravelLegNo=travelItem.travel_leg_no
+                        Miles = travelItem.travel_distance,
+                        Deducted = travelItem.deduct_miles,
+                        Final_Mile = 0,
+                        Reimbursement = 0,
+                        TravelLegNo = travelItem.travel_leg_no
                     });
-                    _repo.InsertTravelMileage(travelId, travelItem.travel_dt, st.State, rate, st.Miles, st.Deducted, finalMiles, finalMiles * rate, travelItem.travel_leg_no, travelItem.merch_no, st.Apicalls);
 
-                    Log.Information(
-                        "State summary travel_id={TravelId} State={State} Miles={Miles:F2} Deducted={Deduct:F2} Final={Final:F2} TravelLegNo={TravelLegNo}",
-                        travelId, st.State, st.Miles, st.Deducted, finalMiles , travelItem.travel_leg_no
+                    _repo.InsertTravelMileage(
+                        travelId,
+                        travelItem.travel_dt,
+                        startState,
+                        rate,
+                        travelItem.travel_distance,
+                        travelItem.deduct_miles,
+                        0,
+                        0,
+                        travelItem.travel_leg_no,
+                        travelItem.merch_no,
+                        0
                     );
-                }
+                    Log.Information(
+                            "State summary travel_id={TravelId} State={State} Miles={Miles:F2} Deducted={Deduct:F2} Final={Final:F2} TravelLegNo={TravelLegNo}",
+                            travelId, startState, travelItem.travel_distance,travelItem.deduct_miles, 0, travelItem.travel_leg_no
+                        );
 
-                sw.Stop();
-                Log.Information(
-                    "Completed travel_id {TravelId} in {Seconds:F2}s (Directions={Dir}, Geocode={Geo}, Total={Tot})",
-                    travelId, sw.Elapsed.TotalSeconds, directionsCalls, geocodeCalls,
-                    directionsCalls + geocodeCalls
-                );
+
+                }
+                else //deducted miles are less than travel distance
+                {
+                    foreach (var leg in group)
+                    {
+                        try
+                        {
+                            var counts = await ProcessLeg(allSegments, leg);
+                            directionsCalls += counts.Directions;
+                            geocodeCalls += counts.Geocodes;
+
+                            foreach (var kv in counts.StateApiCount)
+                            {
+                                if (travelStateApiCounts.ContainsKey(kv.Key))
+                                    travelStateApiCounts[kv.Key] += kv.Value;
+                                else
+                                    travelStateApiCounts[kv.Key] = kv.Value;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error(ex, "Leg error for travel_id {TravelId}. Continuing.", travelId);
+                        }
+                    }
+
+                    // APPLY NEW DEDUCTION LOGIC (START-STATE-FIRST)
+                    if ((travelItem.start_leg_deduction == "Y") && (travelItem.deduct_miles > 0))
+                    {
+                        ApplyDeductionStartStateFirst(travelItem.deduct_miles, allSegments, travelId);
+                    }
+                    // APPLY NEW DEDUCTION LOGIC (START-STATE-FIRST)
+                    if ((travelItem.start_leg_deduction == "N") && (travelItem.deduct_miles > 0))
+                    {
+                        ApplyDeductionFromLastState(travelItem.deduct_miles, allSegments, travelId);
+                    }
+
+                    // Aggregate by state
+                    var stateAggregates = allSegments
+                        .GroupBy(s => s.State)
+                        .Select(g => new
+                        {
+                            State = g.Key,
+                            Miles = g.Sum(x => x.Miles),
+                            Deducted = g.Sum(x => x.Deducted),
+                            Apicalls = travelStateApiCounts.ContainsKey(g.Key)
+                ? travelStateApiCounts[g.Key]
+                : 0,
+                        })
+                        .ToList();
+
+                    // Build output rows
+                    foreach (var st in stateAggregates)
+                    {
+                        double rate = _stateRates.ContainsKey(st.State) ? 0.70 : 0.30;
+                        double finalMiles = st.Miles - st.Deducted;
+
+                        output.Add(new OutputRecord
+                        {
+                            travel_id = travelId,
+                            travel_dt = travelItem.travel_dt,
+                            State = st.State,
+                            Rate = rate,
+                            Miles = st.Miles,
+                            Deducted = st.Deducted,
+                            Final_Mile = finalMiles,
+                            Reimbursement = finalMiles * rate,
+                            TravelLegNo = travelItem.travel_leg_no
+                        });
+                        _repo.InsertTravelMileage(travelId, travelItem.travel_dt, st.State, rate, st.Miles, st.Deducted, finalMiles, finalMiles * rate, travelItem.travel_leg_no, travelItem.merch_no, st.Apicalls);
+
+                        Log.Information(
+                            "State summary travel_id={TravelId} State={State} Miles={Miles:F2} Deducted={Deduct:F2} Final={Final:F2} TravelLegNo={TravelLegNo} Apicall={Apicallcount}",
+                            travelId, st.State, st.Miles, st.Deducted, finalMiles, travelItem.travel_leg_no,st.Apicalls
+                        );
+                    }
+                } 
+
+                    sw.Stop();
+                    Log.Information(
+                        "Completed travel_id {TravelId} in {Seconds:F2}s (Directions={Dir}, Geocode={Geo}, Total={Tot})",
+                        travelId, sw.Elapsed.TotalSeconds, directionsCalls, geocodeCalls,
+                        directionsCalls + geocodeCalls
+                    );
+                
 
 
             }

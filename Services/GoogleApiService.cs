@@ -10,9 +10,6 @@ public class GoogleApiService
     private readonly string _apiKey;
 
     private readonly Dictionary<string, string> _stateCache = new();
-    private readonly Dictionary<string, int> _stateGeocodeCalls = new();
-    public Dictionary<string, int> StateGeocodeCalls => _stateGeocodeCalls;
-
     public GoogleApiService(string apiKey)
     {
         _apiKey = apiKey;
@@ -58,11 +55,6 @@ public class GoogleApiService
         string state = stateComp?.short_name ?? "UNK";
 
         _stateCache[key] = state;
-
-        if (_stateGeocodeCalls.ContainsKey(state))
-    _stateGeocodeCalls[state]++;
-else
-    _stateGeocodeCalls[state] = 1;
     
         return state;
     }
