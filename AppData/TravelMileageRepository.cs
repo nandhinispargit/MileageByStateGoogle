@@ -22,7 +22,6 @@ namespace MileageByStateGoogle.AppData
                 using SqlCommand cmd = new SqlCommand("usp_TravelMileagebyState", conn);
 
                 cmd.CommandType = CommandType.StoredProcedure;
-
                 cmd.Parameters.Add("@travel_id", System.Data.SqlDbType.NVarChar, 100).Value = travelId;
                 cmd.Parameters.Add("@travel_dt", System.Data.SqlDbType.NVarChar).Value = travelDate;
                 cmd.Parameters.Add("@state_cd", System.Data.SqlDbType.NVarChar, 10).Value = stateCode;
@@ -33,8 +32,7 @@ namespace MileageByStateGoogle.AppData
                 cmd.Parameters.Add("@reimbursement", System.Data.SqlDbType.Decimal).Value = reimbursement;
                 cmd.Parameters.Add("@travel_leg_no", System.Data.SqlDbType.Int).Value = travel_leg_no;
                 cmd.Parameters.Add("@merch_no", System.Data.SqlDbType.Int).Value = merch_no;  
-                cmd.Parameters.Add("@apicallcount", System.Data.SqlDbType.Int).Value = apiCallscount;
-                //  cmd.Parameters.Add("@create_usrid", System.Data.SqlDbType.NVarChar, 10).Value = userId;
+                cmd.Parameters.Add("@apicallcount", System.Data.SqlDbType.Int).Value = apiCallscount;  
 
                 conn.Open();
                 cmd.ExecuteNonQuery();
@@ -45,7 +43,7 @@ namespace MileageByStateGoogle.AppData
             }
         }
         public async Task InsertTravelMileageSummaryAsync(string travelId, string travelDate, decimal travelDistance, decimal actualAmount, 
-        decimal milesByState, decimal adjustedAmount,string highpay_state_flag)
+        decimal milesByState, decimal adjustedAmount,string highpay_state_flag,int travel_leg_no)
         {
             using SqlConnection conn = new SqlConnection(_connectionString);
             using SqlCommand cmd = new SqlCommand("usp_TravelMileageSummary", conn);
@@ -54,13 +52,13 @@ namespace MileageByStateGoogle.AppData
 
             cmd.Parameters.Add("@travel_id", System.Data.SqlDbType.NVarChar, 150).Value = travelId;
             cmd.Parameters.Add("@travel_dt", System.Data.SqlDbType.NVarChar).Value = travelDate;
+            cmd.Parameters.Add("@travel_leg_no", System.Data.SqlDbType.Int).Value = travel_leg_no;
             cmd.Parameters.Add("@travel_distance", System.Data.SqlDbType.Decimal).Value = travelDistance;
             cmd.Parameters.Add("@actual_amount", System.Data.SqlDbType.Decimal).Value = actualAmount;
             cmd.Parameters.Add("@MilesByState", System.Data.SqlDbType.Decimal).Value = milesByState;
             cmd.Parameters.Add("@adjusted_amount", System.Data.SqlDbType.Decimal).Value = adjustedAmount;   
             // cmd.Parameters.Add("@create_usrid", SqlDbType.NVarChar, 20).Value = userId;
             cmd.Parameters.Add("@highpay_state_flag", System.Data.SqlDbType.NVarChar, 10).Value = highpay_state_flag;
-         //   cmd.Parameters.Add("@apicallcount", System.Data.SqlDbType.Int).Value = apiCallscount;
 
             await conn.OpenAsync();
             await cmd.ExecuteNonQueryAsync();

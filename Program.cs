@@ -39,7 +39,7 @@ internal class Program
         Log.Information("Program initialization completed.");
     }
 
-    static async Task Main(string[] args)
+     static async Task Main(string[] args)
     {
         Log.Information("Mileage calculation started.");
         args = new string[1];
@@ -62,15 +62,16 @@ internal class Program
             var google = new GoogleApiService(ApiKey);
             var csv = new CsvService();
             var repo = new TravelMileageRepository(sConnString);
-            var engine = new MileageEngine(google, repo);
+            var stateService = new StateBoundaryService();
+            var engine = new MileageEngine(google, repo,stateService);
 
-            var travelinforesult =await repo.GetTravelInfoAsync(iLangId);
+            var travelinforesult = await repo.GetTravelInfoAsync(iLangId);
             var travelItems = travelinforesult.TravelItems;
             var travelDetails = travelinforesult.TravelDetails;
 
             // LOAD INPUT CSVs
-          //  var travelItems = csv.LoadCsv<TravelItem>("Data/Input/TravelItems.csv");
-         //   var travelDetails = csv.LoadCsv<TravelDetail>("Data/Input/TravelItemDetails.csv");
+            //  var travelItems = csv.LoadCsv<TravelItem>("Data/Input/TravelItems.csv");
+            //   var travelDetails = csv.LoadCsv<TravelDetail>("Data/Input/TravelItemDetails.csv");
 
             // RUN MILEAGE ENGINE
             var results = await engine.CalculateMileageByState(travelItems, travelDetails);
@@ -99,12 +100,13 @@ internal class Program
             // ----------------------------------------------------------
 
             var summary = results.OutputRecords
-                .GroupBy(r => r.travel_id)
-               // .Where(g => g.Any(r => highPayStates.Contains(r.State))) // include full trip if ANY high-pay state exists
+                .GroupBy(r => new{r.travel_id, r.TravelLegNo})
+                // .Where(g => g.Any(r => highPayStates.Contains(r.State))) // include full trip if ANY high-pay state exists
                 .Select(g =>
                 {
-                    string travelId = g.Key;
-                    var travelItemRows = travelItems.Where(t => t.travel_id == travelId).ToList();
+                    string travelId = g.Key.travel_id;
+                    int travellegno = g.Key.TravelLegNo;
+                    var travelItemRows = travelItems.Where(t => t.travel_id == travelId && t.travel_leg_no == travellegno).ToList();
 
                     string hasHighPayState =
             g.Any(r => highPayStates.Contains(r.State)) ? "Y" : "N";
@@ -113,25 +115,26 @@ internal class Program
                     return new SummaryRecord
                     {
                         travel_id = travelId,
+                        travel_leg_no= travellegno,
                         travel_dt = travelItemRows.First().travel_dt,
                         travel_distance = travelItemRows.Sum(t => t.travel_distance),
                         actual_amount = travelItemRows.Sum(t => t.actual_amount),
 
-                        
+
                         MilesByState = g.Sum(r => r.Final_Mile),
 
-                        
+
                         adjusted_amount = g.Sum(r => r.Reimbursement),
 
-                        has_highppayrate_state= hasHighPayState
+                        has_highppayrate_state = hasHighPayState
                     };
                 })
                 .ToList();
 
             foreach (var s in summary)
             {
-                await repo.InsertTravelMileageSummaryAsync(s.travel_id, s.travel_dt, (decimal)s.travel_distance, 
-                (decimal)s.actual_amount, (decimal)Math.Round(s.MilesByState, 2), (decimal)Math.Round(s.adjusted_amount, 2),s.has_highppayrate_state);
+                await repo.InsertTravelMileageSummaryAsync(s.travel_id, s.travel_dt, (decimal)s.travel_distance,
+                (decimal)s.actual_amount, (decimal)Math.Round(s.MilesByState, 2), (decimal)Math.Round(s.adjusted_amount, 2), s.has_highppayrate_state,s.travel_leg_no);
             }
 
 
@@ -151,6 +154,7 @@ internal class Program
             Log.CloseAndFlush();
         }
     }
+
 
     static string Get_CountryCode(Int32 iCountry)
     {

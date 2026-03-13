@@ -3,6 +3,8 @@ namespace MileageByStateGoogle.Models
     public class SummaryRecord
     {
         public string travel_id { get; set; }
+
+        public int travel_leg_no { get; set; }
         public string travel_dt { get; set; }
 
         public double travel_distance { get; set; }
